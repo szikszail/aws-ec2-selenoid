@@ -1,5 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import {Construct} from 'constructs';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 
@@ -29,22 +29,32 @@ export class AwsEc2SelenoidStack extends cdk.Stack {
     securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(4444), 'allow selenium access from the world');
     securityGroup.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8080), 'allow selenoid access from the world');
 
+    const allUserData = new ec2.MultipartUserData();
+
+    allUserData.addUserDataPart(ec2.UserData.custom(`
+    #cloud-config
+    cloud_final_modules:
+      - [scripts-user, always]`))
+
     const userData = ec2.UserData.forLinux();
     userData.addCommands(
       'yum update -y',
       'yum install -y docker',
       'service docker start',
       'usermod -a -G docker ec2-user',
-      'wget https://github.com/aerokube/cm/releases/download/1.8.5/cm_linux_amd64',
-      'chmod +x cm_linux_amd64',
-      './cm_linux_amd64 selenoid configure --browsers chrome,edge,safari,firefox --last-versions 4 --tmpfs 128',
-      './cm_linux_amd64 selenoid start --vnc --tmpfs 128',
-      './cm_linux_amd64 selenoid-ui start',
+      'mkdir -p /home/ec2-user/selenoid',
+      'wget https://github.com/aerokube/cm/releases/download/1.8.5/cm_linux_amd64 -O /home/ec2-user/selenoid/cm',
+      'chmod +x /home/ec2-user/selenoid/cm',
+      '/home/ec2-user/selenoid/cm selenoid configure --browsers "chrome;MicrosoftEdge" --last-versions 2 --tmpfs 128',
+      '/home/ec2-user/selenoid/cm selenoid start --vnc --tmpfs 128',
+      '/home/ec2-user/selenoid/cm selenoid-ui start',
     );
+
+    allUserData.addUserDataPart(userData, 'text/x-shellscript; charset="us-ascii"');
 
     const instance = new ec2.Instance(this, 'Instance', {
       vpc,
-      userData,
+      userData: allUserData,
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.BURSTABLE2, ec2.InstanceSize.MICRO),
       machineImage: ec2.MachineImage.latestAmazonLinux2(),
       keyName: keyPair.ref,
@@ -60,6 +70,9 @@ export class AwsEc2SelenoidStack extends cdk.Stack {
     });
     new cdk.CfnOutput(this, 'KeyPairName', {
       value: keyPair.attrKeyPairId,
+    });
+    new cdk.CfnOutput(this, 'InstanceId', {
+      value: instance.instanceId,
     });
   }
 }
